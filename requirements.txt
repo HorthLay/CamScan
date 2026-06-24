@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+opencv-python
+numpy
+pillow
+insightface
+onnxruntime
+sqlalchemy
+pymysql
+python-multipart
+python-dotenv
+aiofiles
+websockets
+requests
+pydantic
