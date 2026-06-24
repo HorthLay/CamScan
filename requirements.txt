@@ -13,3 +13,5 @@ aiofiles
 websockets
 requests
 pydantic
+httpx
+pyttsx3

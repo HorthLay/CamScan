@@ -1,92 +1,57 @@
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 import cv2
 
-app = FastAPI(title="Face Recognition API")
+from database import create_tables
+from routers.registration import router as registration_router
 
-# Load face detector once
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_tables()                         # create all tables on startup
+    camera = cv2.VideoCapture(0)
+    if not camera.isOpened():
+        print("Warning: Cannot open webcam.")
+    app.state.camera = camera
+    yield
+    app.state.camera.release()
+
+
+app = FastAPI(title="CamScan – Face Recognition API", lifespan=lifespan)
+app.include_router(registration_router)
+
+
+# ── Basic Haar-cascade live stream ───────────────────────────────────────────
+
 face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades +
-    "haarcascade_frontalface_default.xml"
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-# Open webcam
-camera = cv2.VideoCapture(0)
 
-if not camera.isOpened():
-    print("Error: Cannot open webcam")
-
-
-def generate_frames():
+def generate_frames(camera: cv2.VideoCapture):
     while True:
-        success, frame = camera.read()
-
-        if not success:
+        ok, frame = camera.read()
+        if not ok:
             break
-
-        # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Detect faces
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
-        )
-
-        # Draw rectangle around faces
+        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
         for (x, y, w, h) in faces:
-            cv2.rectangle(
-                frame,
-                (x, y),
-                (x + w, y + h),
-                (0, 255, 0),
-                2
-            )
-
-            cv2.putText(
-                frame,
-                "Face",
-                (x, y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 0),
-                2
-            )
-
-        # Convert frame to JPEG
-        ret, buffer = cv2.imencode(".jpg", frame)
-
-        if not ret:
-            continue
-
-        frame_bytes = buffer.tobytes()
-
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + frame_bytes +
-            b"\r\n"
-        )
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(frame, "Face", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        ret, buf = cv2.imencode(".jpg", frame)
+        if ret:
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
 
 
 @app.get("/")
 def home():
-    return {
-        "status": "running",
-        "message": "Face Recognition API"
-    }
+    return {"status": "running", "message": "CamScan Face Recognition API"}
 
 
 @app.get("/video_feed")
-def video_feed():
+def video_feed(request: Request):
     return StreamingResponse(
-        generate_frames(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        generate_frames(request.app.state.camera),
+        media_type="multipart/x-mixed-replace; boundary=frame",
     )
-
-
-@app.on_event("shutdown")
-def shutdown_event():
-    camera.release()
