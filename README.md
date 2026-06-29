@@ -206,8 +206,8 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/register/capture` | 3-2-1 voice countdown → capture face → Mistral AI analysis |
-| POST | `/register/user/confirm` | Save captured user to DB (after /capture) |
+| POST | `/register/search` | Capture face and search existing users |
+| POST | `/register/user/confirm` | Save captured user to DB (after /search) |
 | POST | `/register/user` | Manual upload registration (also runs Mistral) |
 | POST | `/register/user/{id}/face` | Add extra face photo to existing user |
 | GET | `/register/users` | List all registered users |
@@ -226,7 +226,7 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 ## Registration Flow (Webcam)
 
 ```
-1.  Call  POST /register/capture
+1.  Call  POST /register/search
           │
           ▼
 2.  Webcam speaks "3... 2... 1... Smile!"
@@ -238,17 +238,14 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 4.  InsightFace detects face + generates 512-d embedding
           │
           ▼
-5.  Mistral Pixtral analyzes photo
-          │  returns: estimated_age, gender, suggested_position, notes
-          ▼
-6.  Response: image_base64 + all AI suggestions
-
-7.  Frontend shows pre-filled form (user can edit name/age/position)
-
-8.  Call  POST /register/user/confirm  with confirmed fields
+5.  Server compares embedding to all stored users
           │
           ▼
-9.  User + embedding saved to MySQL
+6.  Response: matched user data + confidence if found, or "No matching user found."
+
+7.  Frontend can use the matched user directly or fall back to registration.
+
+8.  Call  POST /register/user/confirm  only when creating a new user.
 ```
 
 ---

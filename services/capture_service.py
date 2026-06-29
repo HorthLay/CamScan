@@ -7,8 +7,12 @@ Manages Webcam #1 (registration camera) with:
   - Returns raw JPEG bytes of the captured frame
 """
 
+import io
+import math
+import struct
 import threading
 import time
+import wave
 import cv2
 import numpy as np
 from typing import Optional
@@ -55,14 +59,7 @@ def _speak(text: str):
         print(f"[TTS] Warning: {e}")   # non-fatal — continue without voice
 
 
-def _countdown_and_capture(camera: cv2.VideoCapture) -> np.ndarray:
-    """Say 3 → 2 → 1 → Smile!, then capture a fresh frame."""
-    for number in ["3", "2", "1"]:
-        _speak(number)
-        time.sleep(1.0)
-
-    _speak("Smile!")
-
+def _read_fresh_frame(camera: cv2.VideoCapture) -> np.ndarray:
     # Flush stale frames then grab a fresh one
     for _ in range(3):
         camera.grab()
@@ -72,6 +69,23 @@ def _countdown_and_capture(camera: cv2.VideoCapture) -> np.ndarray:
         raise HTTPException(status_code=503, detail="Failed to capture frame from camera.")
 
     return frame
+
+
+def _countdown_and_capture(camera: cv2.VideoCapture) -> np.ndarray:
+    """Say 3 → 2 → 1 → Smile!, then capture a fresh frame."""
+    for number in ["3", "2", "1"]:
+        _speak(number)
+        time.sleep(1.0)
+
+    _speak("Smile!")
+    return _read_fresh_frame(camera)
+
+
+def _encode_jpeg(frame: np.ndarray, quality: int = 95) -> bytes:
+    ret, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ret:
+        raise HTTPException(status_code=500, detail="Failed to encode captured frame.")
+    return buffer.tobytes()
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -85,18 +99,61 @@ def capture_with_countdown() -> bytes:
         camera = get_camera()
         frame  = _countdown_and_capture(camera)
 
-    ret, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-    if not ret:
-        raise HTTPException(status_code=500, detail="Failed to encode captured frame.")
+    return _encode_jpeg(frame)
 
-    return buffer.tobytes()
+
+def capture_frame() -> bytes:
+    """Capture one fresh frame without server-side sound."""
+    with _lock:
+        camera = get_camera()
+        frame = _read_fresh_frame(camera)
+
+    return _encode_jpeg(frame)
+
+
+def read_camera_frame() -> np.ndarray:
+    """Read one frame from the shared registration camera."""
+    with _lock:
+        camera = get_camera()
+        ok, frame = camera.read()
+    if not ok or frame is None:
+        raise HTTPException(status_code=503, detail="Cannot read from camera.")
+    return frame
 
 
 def capture_preview_frame() -> bytes:
     """Return a single live frame (no countdown) — used for camera preview check."""
-    camera = get_camera()
-    ok, frame = camera.read()
-    if not ok:
-        raise HTTPException(status_code=503, detail="Cannot read from camera.")
-    _, buffer = cv2.imencode(".jpg", frame)
-    return buffer.tobytes()
+    return _encode_jpeg(read_camera_frame(), quality=90)
+
+
+def build_countdown_audio() -> bytes:
+    """
+    Build a browser-playable WAV countdown cue.
+    The browser plays this, then calls capture_frame() so sound comes from the web UI.
+    """
+    sample_rate = 44100
+    amplitude = 16000
+    parts = [
+        (660, 0.22), (0, 0.78),
+        (660, 0.22), (0, 0.78),
+        (660, 0.22), (0, 0.78),
+        (880, 0.45), (0, 0.15),
+    ]
+
+    pcm = bytearray()
+    for frequency, seconds in parts:
+        samples = int(sample_rate * seconds)
+        for i in range(samples):
+            if frequency:
+                value = int(amplitude * math.sin(2 * math.pi * frequency * i / sample_rate))
+            else:
+                value = 0
+            pcm.extend(struct.pack("<h", value))
+
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(bytes(pcm))
+    return output.getvalue()

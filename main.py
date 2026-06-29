@@ -1,24 +1,46 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+import os
+
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import cv2
 
 from database import create_tables
 from routers.registration import router as registration_router
+from services.capture_service import get_camera, read_camera_frame, release_camera
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()                         # create all tables on startup
-    camera = cv2.VideoCapture(0)
-    if not camera.isOpened():
+    try:
+        get_camera()
+    except Exception:
         print("Warning: Cannot open webcam.")
-    app.state.camera = camera
     yield
-    app.state.camera.release()
+    release_camera()
 
+
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="CamScan – Face Recognition API", lifespan=lifespan)
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 app.include_router(registration_router)
 
 
@@ -29,10 +51,11 @@ face_cascade = cv2.CascadeClassifier(
 )
 
 
-def generate_frames(camera: cv2.VideoCapture):
+def generate_frames():
     while True:
-        ok, frame = camera.read()
-        if not ok:
+        try:
+            frame = read_camera_frame()
+        except Exception:
             break
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
@@ -50,8 +73,8 @@ def home():
 
 
 @app.get("/video_feed")
-def video_feed(request: Request):
+def video_feed():
     return StreamingResponse(
-        generate_frames(request.app.state.camera),
+        generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )

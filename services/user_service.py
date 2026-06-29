@@ -25,7 +25,7 @@ def save_file(data: bytes, directory: Path, user_id: int) -> str:
     filename = f"{user_id}_{uuid.uuid4().hex}.jpg"
     path     = directory / filename
     path.write_bytes(data)
-    return str(path)
+    return str(path).replace("\\", "/")
 
 
 def create_user(
@@ -115,7 +115,10 @@ def load_all_embeddings(db: Session) -> List[dict]:
             "name":         user.name,
             "position":     user.position,
             "age":          user.age,
+            "gender":       user.gender,
             "face_image":   user.face_image,
+            "image_user":   user.image_user,
+            "ai_notes":     user.ai_notes,
             "embedding":    emb.embedding,
         }
         for emb, user in rows

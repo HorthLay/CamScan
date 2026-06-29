@@ -4,12 +4,17 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from database import get_db
-from services.face_service import decode_image, generate_embedding
+from services.face_service import decode_image, generate_embedding, find_best_match
 from services.user_service import (
     create_user, get_user, get_all_users,
     delete_user, add_embedding, load_all_embeddings,
 )
-from services.capture_service import capture_with_countdown, capture_preview_frame
+from services.capture_service import (
+    build_countdown_audio,
+    capture_frame,
+    capture_preview_frame,
+    capture_with_countdown,
+)
 from services.mistral_service import analyze_face
 
 router = APIRouter(prefix="/register", tags=["Registration"])
@@ -25,23 +30,55 @@ def _validate(file: UploadFile, data: bytes):
         raise HTTPException(status_code=413, detail="Image exceeds 10 MB.")
 
 
-@router.post("/capture", summary="3-2-1 voice countdown → capture face → Mistral analysis")
-async def capture_and_analyze():
-    jpeg_bytes = capture_with_countdown()
-    img_bgr    = decode_image(jpeg_bytes)
-    embedding  = generate_embedding(img_bgr)
-    analysis   = await analyze_face(jpeg_bytes)
+@router.get("/countdown-audio", summary="Browser-playable registration countdown sound")
+def countdown_audio():
+    return Response(
+        content=build_countdown_audio(),
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Countdown-Duration": "4",
+        },
+    )
+
+
+@router.post("/search", summary="Capture face and search existing users")
+async def capture_and_search(
+    server_countdown: bool = False,
+    db: Session = Depends(get_db),
+):
+    if server_countdown:
+        jpeg_bytes = capture_with_countdown()
+    else:
+        jpeg_bytes = capture_frame()
+
+    img_bgr          = decode_image(jpeg_bytes)
+    probe_embedding  = generate_embedding(img_bgr)
+    candidates       = load_all_embeddings(db)
+    match            = find_best_match(probe_embedding, candidates, threshold=0.55)
 
     import base64
-    return {
-        "success":            True,
-        "image_base64":       base64.b64encode(jpeg_bytes).decode(),
-        "estimated_age":      analysis["estimated_age"],
-        "gender":             analysis["gender"],
-        "suggested_position": analysis["suggested_position"],
-        "ai_notes":           analysis["notes"],
-        "message":            "Face captured. Confirm details then POST /register/user/confirm.",
+    response = {
+        "success":      True,
+        "matched":      match is not None,
+        "image_base64": base64.b64encode(jpeg_bytes).decode(),
+        "message":      "User matched." if match else "No matching user found.",
     }
+
+    if match:
+        response["user"] = {
+            "id":         match.get("user_id"),
+            "name":       match.get("name"),
+            "age":        match.get("age"),
+            "gender":     match.get("gender"),
+            "position":   match.get("position"),
+            "face_image": match.get("face_image"),
+            "image_user": match.get("image_user"),
+            "ai_notes":   match.get("ai_notes"),
+            "confidence": match.get("confidence"),
+        }
+
+    return response
 
 
 @router.post("/user/confirm", summary="Save captured + analyzed user to DB")
