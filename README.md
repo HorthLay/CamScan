@@ -105,6 +105,8 @@ DATABASE_URL=mysql+pymysql://root:@localhost:3306/camscan
 
 # Mistral AI — get free key at https://console.mistral.ai
 MISTRAL_API_KEY=your_mistral_api_key_here
+MISTRAL_AGENT_ID=ag_019f12454e1c719eaeb6258b095471d1
+MISTRAL_AGENT_VERSION=0
 ```
 
 ---
@@ -191,10 +193,10 @@ cp .env.example .env
 
 ### 6. Run the server
 ```bash
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8001
 ```
 
-Open `http://localhost:8000/docs` — Swagger UI shows all endpoints.
+Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 
 ---
 

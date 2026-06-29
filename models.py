@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, SmallInteger, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -10,11 +10,14 @@ class User(Base):
 
     id            = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name          = Column(String(100), nullable=False)
+    age           = Column(SmallInteger, nullable=True)
+    gender        = Column(String(20), nullable=True)
     face_image    = Column(String(512), nullable=True)   # path to primary face photo
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     face_embeding = Column(Text, nullable=True)           # JSON cache of latest embedding
     position      = Column(String(100), nullable=True)
     image_user    = Column(String(512), nullable=True)   # profile / ID-card image path
+    ai_notes      = Column(String(255), nullable=True)
 
     embeddings = relationship("FaceEmbedding", back_populates="user", cascade="all, delete-orphan")
     detections = relationship("Detection",     back_populates="user")

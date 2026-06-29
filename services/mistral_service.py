@@ -12,37 +12,69 @@ Uses Mistral AI vision to analyze a face photo and auto-fill:
 import os
 import base64
 import json
-import httpx
+import asyncio
 from fastapi import HTTPException
 from dotenv import load_dotenv
+
+try:
+    from mistralai.client import Mistral
+except ImportError:  # Newer SDKs expose Mistral at the package root.
+    from mistralai import Mistral
 
 load_dotenv()
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_MODEL   = "pixtral-12b-2409"   # Mistral vision model
+MISTRAL_AGENT_ID = os.getenv("MISTRAL_AGENT_ID", "ag_019f12454e1c719eaeb6258b095471d1")
+MISTRAL_AGENT_VERSION = int(os.getenv("MISTRAL_AGENT_VERSION", "0"))
 
 
 def _image_to_base64(image_bytes: bytes) -> str:
     return base64.b64encode(image_bytes).decode("utf-8")
 
 
-async def analyze_face(image_bytes: bytes) -> dict:
-    """
-    Send face image to Mistral Pixtral vision model.
-    Returns dict: { age, gender, position, notes }
-    """
-    if not MISTRAL_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="MISTRAL_API_KEY not set in .env"
-        )
+def _strip_markdown(content: str) -> str:
+    return content.replace("```json", "").replace("```", "").strip()
 
+
+def _find_json_text(value) -> str | None:
+    if isinstance(value, str):
+        content = _strip_markdown(value)
+        if "{" in content and "}" in content:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            return content[start:end]
+        return None
+
+    if isinstance(value, dict):
+        for child in value.values():
+            found = _find_json_text(child)
+            if found:
+                return found
+        return None
+
+    if isinstance(value, list):
+        for child in value:
+            found = _find_json_text(child)
+            if found:
+                return found
+        return None
+
+    if hasattr(value, "model_dump"):
+        return _find_json_text(value.model_dump())
+
+    if hasattr(value, "__dict__"):
+        return _find_json_text(vars(value))
+
+    return None
+
+
+def _start_face_analysis_conversation(image_bytes: bytes):
+    client = Mistral(api_key=MISTRAL_API_KEY)
     b64 = _image_to_base64(image_bytes)
 
     prompt = """You are a professional HR assistant analyzing a face photo for employee registration.
 
-Analyze this face photo and respond ONLY with a valid JSON object — no extra text, no markdown, no explanation.
+Analyze this face photo and respond ONLY with a valid JSON object. No extra text, no markdown, no explanation.
 
 Return exactly this structure:
 {
@@ -54,51 +86,56 @@ Return exactly this structure:
 
 Be respectful and professional. If the photo is unclear or no face is visible, still return the JSON with nulls where needed."""
 
-    payload = {
-        "model": MISTRAL_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64}"
-                        }
+    inputs = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": prompt,
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{b64}",
                     },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }
-        ],
-        "max_tokens": 300,
-        "temperature": 0.1,
-    }
+                },
+            ],
+        }
+    ]
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            MISTRAL_API_URL,
-            headers={
-                "Authorization": f"Bearer {MISTRAL_API_KEY}",
-                "Content-Type":  "application/json",
-            },
-            json=payload,
+    return client.beta.conversations.start(
+        agent_id=MISTRAL_AGENT_ID,
+        agent_version=MISTRAL_AGENT_VERSION,
+        inputs=inputs,
+    )
+
+
+async def analyze_face(image_bytes: bytes) -> dict:
+    """
+    Send face image to the configured Mistral agent.
+    Returns dict: { age, gender, position, notes }
+    """
+    if not MISTRAL_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="MISTRAL_API_KEY not set in .env"
         )
 
-    if response.status_code != 200:
+    try:
+        response = await asyncio.to_thread(_start_face_analysis_conversation, image_bytes)
+    except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Mistral API error: {response.text}"
+            detail=f"Mistral API error: {exc}"
+        ) from exc
+
+    content = _find_json_text(response)
+    if not content:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Mistral returned no JSON content: {response}"
         )
-
-    data    = response.json()
-    content = data["choices"][0]["message"]["content"].strip()
-
-    # Strip any accidental markdown fences
-    content = content.replace("```json", "").replace("```", "").strip()
-
     try:
         result = json.loads(content)
     except json.JSONDecodeError:
