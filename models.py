@@ -1,8 +1,14 @@
-from datetime import datetime
-from sqlalchemy import Column, Integer, SmallInteger, String, Text, DateTime, ForeignKey
+from datetime import datetime, date
+from sqlalchemy import Column, Integer, SmallInteger, String, Text, DateTime, ForeignKey, Date
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
+
+
+def calculate_age(dob: date) -> int:
+    """Calculate age from date of birth."""
+    today = date.today()
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
 class User(Base):
@@ -10,7 +16,8 @@ class User(Base):
 
     id            = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name          = Column(String(100), nullable=False)
-    age           = Column(SmallInteger, nullable=True)
+    date_of_birth = Column(Date, nullable=True)          # date of birth for age calculation
+    age           = Column(SmallInteger, nullable=True)  # auto-calculated from date_of_birth
     gender        = Column(String(20), nullable=True)
     face_image    = Column(String(512), nullable=True)   # path to primary face photo
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -18,10 +25,23 @@ class User(Base):
     position      = Column(String(100), nullable=True)
     image_user    = Column(String(512), nullable=True)   # profile / ID-card image path
     ai_notes      = Column(String(255), nullable=True)
+    note          = Column(String(20), nullable=True)    # enum-like: walkout, work, resign
 
     embeddings = relationship("FaceEmbedding", back_populates="user", cascade="all, delete-orphan")
     detections = relationship("Detection",     back_populates="user")
     videos     = relationship("Video",         back_populates="user")
+
+    @property
+    def calculated_age(self) -> int:
+        """Calculate age from date_of_birth property."""
+        if self.date_of_birth:
+            return calculate_age(self.date_of_birth)
+        return None
+
+    def update_age_from_dob(self):
+        """Update age field based on date_of_birth."""
+        if self.date_of_birth:
+            self.age = calculate_age(self.date_of_birth)
 
 
 class FaceEmbedding(Base):

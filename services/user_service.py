@@ -4,8 +4,9 @@ user_service.py
 All database operations for users and embeddings.
 """
 
+import os
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, List
 
@@ -14,6 +15,11 @@ from sqlalchemy.orm import Session
 
 from models import User, FaceEmbedding
 from services.face_service import embedding_to_json
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 FACE_DIR    = Path("uploads/faces")
 PROFILE_DIR = Path("uploads/profiles")
@@ -38,6 +44,8 @@ def create_user(
     age:           Optional[int]   = None,
     gender:        Optional[str]   = None,
     ai_notes:      Optional[str]   = None,
+    date_of_birth: Optional[date]  = None,
+    note:          Optional[str]   = None,
 ) -> User:
     emb_json = embedding_to_json(embedding)
 
@@ -47,6 +55,8 @@ def create_user(
         age           = age,
         gender        = gender,
         ai_notes      = ai_notes,
+        date_of_birth = date_of_birth,
+        note          = note,
         face_embeding = emb_json,
         created_at    = datetime.utcnow(),
     )
@@ -56,6 +66,9 @@ def create_user(
     user.face_image = save_file(face_bytes, FACE_DIR, user.id)
     if profile_bytes:
         user.image_user = save_file(profile_bytes, PROFILE_DIR, user.id)
+    
+    if date_of_birth:
+        user.update_age_from_dob()
 
     emb_record = FaceEmbedding(
         user_id    = user.id,
@@ -65,6 +78,10 @@ def create_user(
     db.add(emb_record)
     db.commit()
     db.refresh(user)
+    
+    # Sync to Laravel
+    sync_user_to_laravel(user)
+    
     return user
 
 
@@ -115,11 +132,40 @@ def load_all_embeddings(db: Session) -> List[dict]:
             "name":         user.name,
             "position":     user.position,
             "age":          user.age,
+            "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
             "gender":       user.gender,
             "face_image":   user.face_image,
             "image_user":   user.image_user,
             "ai_notes":     user.ai_notes,
+            "note":         user.note if user.note else None,
             "embedding":    emb.embedding,
         }
         for emb, user in rows
     ]
+
+
+def sync_user_to_laravel(user: User):
+    """Sync user name, date_of_birth, age, and note to Laravel web app."""
+    if not requests:
+        return
+    
+    laravel_url = os.getenv("LARAVEL_URL", "http://localhost")
+    if not laravel_url:
+        return
+    
+    try:
+        data = {
+            "name": user.name,
+            "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
+            "age": user.age,
+            "note": user.note if user.note else None,
+        }
+        response = requests.post(
+            f"{laravel_url}/api/users/sync-from-fastapi",
+            data=data,
+            timeout=10
+        )
+        response.raise_for_status()
+    except Exception as e:
+        # Log error but don't fail the FastAPI operation
+        print(f"Warning: Failed to sync user to Laravel: {e}")

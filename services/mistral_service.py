@@ -13,6 +13,7 @@ import os
 import base64
 import json
 import asyncio
+from datetime import date
 from fastapi import HTTPException
 from dotenv import load_dotenv
 
@@ -80,11 +81,11 @@ Return exactly this structure:
 {
   "estimated_age": <integer, best estimate of person's age>,
   "gender": "<Male | Female | Unknown>",
-  "suggested_position": "<a realistic job title based on appearance and context, e.g. Engineer, Manager, Staff, Security, etc.>",
   "notes": "<one short sentence observation about the photo quality or face visibility>"
 }
 
-Be respectful and professional. If the photo is unclear or no face is visible, still return the JSON with nulls where needed."""
+Be respectful and professional. Focus only on age estimation and photo quality notes. 
+Do NOT include suggested_position. If the photo is unclear or no face is visible, still return the JSON with nulls where needed."""
 
     inputs = [
         {
@@ -147,6 +148,35 @@ async def analyze_face(image_bytes: bytes) -> dict:
     return {
         "estimated_age":      result.get("estimated_age"),
         "gender":             result.get("gender", "Unknown"),
-        "suggested_position": result.get("suggested_position", ""),
+        "suggested_position": "",
         "notes":              result.get("notes", ""),
     }
+
+
+def generate_ai_notes_from_user(name: str, age: Optional[int] = None, date_of_birth: Optional[date] = None, note: Optional[str] = None) -> str:
+    """
+    Generate AI notes based only on name, age/date_of_birth, and note.
+    This creates a simple note without using external AI.
+    Note can be: walkout, work, resign
+    """
+    from typing import Optional
+    parts = []
+    if name:
+        parts.append(f"Name: {name}")
+    
+    if age:
+        parts.append(f"Age: {age}")
+    elif date_of_birth:
+        calculated_age = (date.today().year - date_of_birth.year - 
+                        ((date.today().month, date.today().day) < (date_of_birth.month, date_of_birth.day)))
+        parts.append(f"Age: {calculated_age} (from DOB: {date_of_birth.isoformat()})")
+    
+    if note:
+        note_detail = {
+            "walkout": "User walked out / left the premises",
+            "work": "User is currently working / active",
+            "resign": "User has resigned / terminated",
+        }.get(note.lower(), f"Note: {note}")
+        parts.append(note_detail)
+    
+    return "; ".join(parts) if parts else ""
