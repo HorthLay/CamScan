@@ -15,6 +15,13 @@ from services.capture_service import (
     capture_frame,
     capture_preview_frame,
     capture_with_countdown,
+    release_camera,
+    start_camera_for_ip,
+    stop_camera_for_ip,
+    is_ip_allowed,
+    get_active_ips,
+    get_stopped_ips,
+    clear_stopped_ip,
 )
 from services.mistral_service import analyze_face, generate_ai_notes_from_user
 
@@ -46,53 +53,66 @@ def countdown_audio():
 @router.post("/search", summary="Capture face and search existing users")
 async def capture_and_search(
     server_countdown: bool = False,
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
-    if server_countdown:
-        jpeg_bytes = capture_with_countdown()
-    else:
-        jpeg_bytes = capture_frame()
-
-    img_bgr          = decode_image(jpeg_bytes)
-    probe_embedding  = generate_embedding(img_bgr)
-    candidates       = load_all_embeddings(db)
-    match            = find_best_match(probe_embedding, candidates, threshold=0.55)
-
-    import base64
-    response = {
-        "success":      True,
-        "matched":      match is not None,
-        "image_base64": base64.b64encode(jpeg_bytes).decode(),
-        "message":      "User matched." if match else "No matching user found.",
-    }
-
-    if match:
-        # Regenerate AI notes with note detail included
-        from datetime import date as date_type
-        date_of_birth = match.get("date_of_birth")
-        dob = date_type.fromisoformat(date_of_birth) if date_of_birth else None
-        ai_notes_with_note = generate_ai_notes_from_user(
-            name=match.get("name") or "",
-            age=match.get("age"),
-            date_of_birth=dob,
-            note=match.get("note")
-        )
+    client_ip = request.client.host if request else "unknown"
+    
+    try:
+        # Start camera for this IP
+        if not start_camera_for_ip(client_ip):
+            raise HTTPException(
+                status_code=403,
+                detail=f"IP {client_ip} is not allowed to use camera"
+            )
         
-        response["user"] = {
-            "id":           match.get("user_id"),
-            "name":         match.get("name"),
-            "age":          match.get("age"),
-            "date_of_birth": match.get("date_of_birth"),
-            "gender":       match.get("gender"),
-            "position":     match.get("position"),
-            "face_image":   match.get("face_image"),
-            "image_user":   match.get("image_user"),
-            "ai_notes":     ai_notes_with_note or match.get("ai_notes") or "",
-            "note":         match.get("note"),
-            "confidence":   match.get("confidence"),
+        if server_countdown:
+            jpeg_bytes = capture_with_countdown()
+        else:
+            jpeg_bytes = capture_frame()
+
+        img_bgr          = decode_image(jpeg_bytes)
+        probe_embedding  = generate_embedding(img_bgr)
+        candidates       = load_all_embeddings(db)
+        match            = find_best_match(probe_embedding, candidates, threshold=0.55)
+
+        import base64
+        response = {
+            "success":      True,
+            "matched":      match is not None,
+            "image_base64": base64.b64encode(jpeg_bytes).decode(),
+            "message":      "User matched." if match else "No matching user found.",
         }
 
-    return response
+        if match:
+            # Regenerate AI notes with note detail included
+            from datetime import date as date_type
+            date_of_birth = match.get("date_of_birth")
+            dob = date_type.fromisoformat(date_of_birth) if date_of_birth else None
+            ai_notes_with_note = generate_ai_notes_from_user(
+                name=match.get("name") or "",
+                age=match.get("age"),
+                date_of_birth=dob,
+                note=match.get("note")
+            )
+            
+            response["user"] = {
+                "id":           match.get("user_id"),
+                "name":         match.get("name"),
+                "age":          match.get("age"),
+                "date_of_birth": match.get("date_of_birth"),
+                "gender":       match.get("gender"),
+                "position":     match.get("position"),
+                "face_image":   match.get("face_image"),
+                "image_user":   match.get("image_user"),
+                "ai_notes":     ai_notes_with_note or match.get("ai_notes") or "",
+                "note":         match.get("note"),
+                "confidence":   match.get("confidence"),
+            }
+
+        return response
+    finally:
+        stop_camera_for_ip(client_ip)
 
 
 @router.post("/user/confirm", summary="Save captured + analyzed user to DB")
@@ -200,9 +220,24 @@ async def register_user_manual(
 
 
 @router.get("/preview", summary="Live camera preview frame (JPEG)")
-def camera_preview():
-    jpeg = capture_preview_frame()
-    return Response(content=jpeg, media_type="image/jpeg")
+def camera_preview(request: Request):
+    client_ip = request.client.host
+    
+    try:
+        # Check if IP is allowed
+        if not is_ip_allowed(client_ip):
+            raise HTTPException(
+                status_code=403,
+                detail=f"IP {client_ip} is not allowed to access camera"
+            )
+        
+        # Start camera for this IP
+        start_camera_for_ip(client_ip)
+        
+        jpeg = capture_preview_frame()
+        return Response(content=jpeg, media_type="image/jpeg")
+    finally:
+        stop_camera_for_ip(client_ip)
 
 
 @router.post("/user/{user_id}/face", summary="Add extra face photo to existing user")
@@ -454,4 +489,105 @@ async def sync_from_laravel(request: Request, db: Session = Depends(get_db)):
         "ai_notes": user.ai_notes,
         "note": user.note if user.note else None,
         "message": f"User {user_id} synced from Laravel.",
+    }
+
+
+# ── IP-based Camera Control Endpoints ────────────────────────────────────────
+
+@router.post("/camera/start", summary="Start camera for specific IP")
+async def start_camera_ip(
+    request: Request,
+):
+    """
+    Start camera access for the requesting IP address.
+    Returns success status and whether camera was started.
+    """
+    # Get client IP from request
+    client_ip = request.client.host
+    
+    try:
+        started = start_camera_for_ip(client_ip)
+        if started:
+            return {
+                "success": True,
+                "message": f"Camera started for IP {client_ip}",
+                "ip": client_ip,
+                "camera_active": True,
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"IP {client_ip} is not allowed to use camera (another IP is using it)",
+                "ip": client_ip,
+                "camera_active": False,
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/camera/stop", summary="Stop camera for specific IP")
+async def stop_camera_ip(
+    request: Request,
+):
+    """
+    Stop camera access for the requesting IP address.
+    The IP will not be able to restart the camera while other IPs are using it.
+    """
+    # Get client IP from request
+    client_ip = request.client.host
+    
+    try:
+        stop_camera_for_ip(client_ip)
+        return {
+            "success": True,
+            "message": f"Camera stopped for IP {client_ip}",
+            "ip": client_ip,
+            "active_ips": list(get_active_ips()),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/camera/status", summary="Get camera status for requesting IP")
+async def camera_status(
+    request: Request,
+):
+    """
+    Check if the requesting IP is allowed to use the camera.
+    """
+    client_ip = request.client.host
+    
+    return {
+        "ip": client_ip,
+        "is_allowed": is_ip_allowed(client_ip),
+        "is_active": client_ip in get_active_ips(),
+        "is_stopped": client_ip in get_stopped_ips(),
+        "active_ips": list(get_active_ips()),
+        "stopped_ips": list(get_stopped_ips()),
+    }
+
+
+@router.post("/camera/clear-stop", summary="Clear stopped status for IP")
+async def clear_camera_stop(
+    request: Request,
+):
+    """
+    Clear the stopped status for the requesting IP, allowing it to use camera again.
+    """
+    client_ip = request.client.host
+    clear_stopped_ip(client_ip)
+    
+    return {
+        "success": True,
+        "message": f"Stopped status cleared for IP {client_ip}",
+        "ip": client_ip,
+    }
+
+
+@router.get("/camera/active-ips", summary="List all active IPs using camera")
+async def list_active_ips():
+    """Get list of all IPs currently using the camera."""
+    return {
+        "active_ips": list(get_active_ips()),
+        "stopped_ips": list(get_stopped_ips()),
     }

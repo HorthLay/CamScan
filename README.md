@@ -300,3 +300,58 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 - `pyttsx3` works fully offline — no internet required for voice countdown
 - InsightFace downloads the `buffalo_l` model (~300 MB) on first run automatically
 - All uploaded files stay local — nothing is sent to external servers except the Mistral API call
+
+---
+
+## IP-based Camera Control
+
+The system now supports IP-based camera access control with the following behavior:
+
+### Rules
+1. **Multiple IPs can use the camera simultaneously** - Each IP that starts the camera can use it
+2. **IP-specific stop** - When an IP stops the camera, it only stops for that IP
+3. **Blocked reopen** - An IP that has stopped the camera cannot restart it while other IPs are still using it
+4. **Automatic release** - The camera is automatically released when the last IP stops using it
+
+### New Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/register/camera/start` | Start camera access for requesting IP |
+| POST | `/register/camera/stop` | Stop camera access for requesting IP |
+| GET | `/register/camera/status` | Check camera access status for requesting IP |
+| POST | `/register/camera/clear-stop` | Clear stopped status for requesting IP (allow reuse) |
+| GET | `/register/camera/active-ips` | List all IPs currently using the camera |
+
+### Usage Example
+
+```javascript
+// IP 192.168.1.100 starts camera
+fetch('http://127.0.0.1:8001/register/camera/start', { method: 'POST' })
+  .then(r => r.json())
+  .then(data => console.log(data));
+
+// Check status
+fetch('http://127.0.0.1:8001/register/camera/status')
+  .then(r => r.json())
+  .then(data => console.log(data));
+
+// Stop camera for this IP
+fetch('http://127.0.0.1:8001/register/camera/stop', { method: 'POST' })
+  .then(r => r.json())
+  .then(data => console.log(data));
+```
+
+### Integration with Laravel
+
+To integrate with Laravel, you can:
+
+1. **Before starting video feed**: Call `/register/camera/start` to register the IP
+2. **When stopping video feed**: Call `/register/camera/stop` to release the IP
+3. **Check if camera is available**: Call `/register/camera/status` before showing camera controls
+
+This ensures that:
+- When User A (IP: 192.168.1.100) stops the camera, it stops for User A
+- User B (IP: 192.168.1.101) can still use the camera
+- User A cannot open the camera again while User B is using it
+- When User B stops the camera, it's fully released
