@@ -29,17 +29,23 @@ _camera_lock = threading.Lock()
 _active_ips: Set[str] = set()
 # Track which IP has explicitly stopped the camera (cannot reopen while others are using it)
 _stopped_ips: Set[str] = set()
+# Track the current stream source (None = local webcam 0, string = URL)
+_current_stream_source: Optional[str] = None
 
 
-def get_camera() -> cv2.VideoCapture:
-    global _camera
-    print("[CAMERA] get_camera() called")
+def get_camera(stream_source: Optional[str] = None) -> cv2.VideoCapture:
+    global _camera, _current_stream_source
+    source = stream_source or _current_stream_source
+    print(f"[CAMERA] get_camera() called, source={source}")
     if _camera is None or not _camera.isOpened():
-        print("[CAMERA] Initializing cv2.VideoCapture(0)")
-        _camera = cv2.VideoCapture(0)   # Webcam #1 — index 0
+        cap_target = source if source else 0
+        print(f"[CAMERA] Initializing cv2.VideoCapture({cap_target})")
+        _camera = cv2.VideoCapture(cap_target)
         if not _camera.isOpened():
-            print("[CAMERA] ERROR: Webcam not available")
-            raise HTTPException(status_code=503, detail="Registration camera (Webcam #1) not available.")
+            _camera = None
+            print(f"[CAMERA] ERROR: Camera not available for source {cap_target}")
+            raise HTTPException(status_code=503, detail=f"Camera source not available: {cap_target}")
+        _current_stream_source = source
         # Warm up — discard first few frames
         for _ in range(5):
             _camera.read()
@@ -47,8 +53,10 @@ def get_camera() -> cv2.VideoCapture:
 
 
 def release_camera(force: bool = False):
-    global _camera
+    """Release the camera. Safe to call even if camera is already released."""
+    global _camera, _current_stream_source
     print(f"[CAMERA] release_camera(force={force}) called, active_streams={_active_streams}, active_ips={len(_active_ips)}")
+    
     with _lock:
         if _active_streams > 0 and not force:
             print("[CAMERA] Camera NOT released because active_streams > 0")
@@ -57,21 +65,31 @@ def release_camera(force: bool = False):
         if len(_active_ips) > 0 and not force:
             print(f"[CAMERA] Camera NOT released because IPs {_active_ips} are still using it")
             return
-        if _camera:
-            print("[CAMERA] Releasing cv2.VideoCapture(0)")
-            _camera.release()
+        try:
+            if _camera is not None:
+                print(f"[CAMERA] Releasing camera (source={_current_stream_source})")
+                _camera.release()
+                print("[CAMERA] Camera successfully released")
+        except Exception as e:
+            print(f"[CAMERA] Warning during release: {e}")
+        finally:
             _camera = None
-            print("[CAMERA] Camera successfully released")
+            _current_stream_source = None
 
 
-def start_camera_for_ip(ip: str) -> bool:
+def start_camera_for_ip(ip: str, stream_url: Optional[str] = None) -> bool:
     """
     Start camera access for a specific IP address.
+    If stream_url is provided, connect to that RTSP/HTTP stream instead of local webcam.
     Returns True if camera was started, False if IP is blocked.
     """
-    global _camera, _active_ips, _stopped_ips
+    global _camera, _active_ips, _stopped_ips, _current_stream_source
     
-    print(f"[CAMERA] start_camera_for_ip({ip}) called")
+    # Safety: handle None/empty IP
+    if not ip:
+        ip = "unknown"
+    
+    print(f"[CAMERA] start_camera_for_ip({ip}, stream_url={stream_url}) called")
     
     with _camera_lock:
         # Check if this IP has explicitly stopped the camera
@@ -86,22 +104,47 @@ def start_camera_for_ip(ip: str) -> bool:
                 _stopped_ips.discard(ip)
                 print(f"[CAMERA] IP {ip} allowed to reuse camera (no other IPs active)")
         
+        # If a new stream_url is provided and differs from current source, switch
+        if stream_url and _current_stream_source != stream_url:
+            # Release existing camera so we can open the new source
+            with _lock:
+                try:
+                    if _camera is not None and _camera.isOpened():
+                        print(f"[CAMERA] Switching source from {_current_stream_source} to {stream_url}")
+                        _camera.release()
+                except Exception as e:
+                    print(f"[CAMERA] Warning during source switch release: {e}")
+                _camera = None
+                _current_stream_source = None
+        
         # Add IP to active IPs
         _active_ips.add(ip)
         print(f"[CAMERA] IP {ip} added to active_ips: {_active_ips}")
         
         # Ensure camera is initialized
-        if _camera is None or not _camera.isOpened():
-            print(f"[CAMERA] Initializing camera for IP {ip}")
-            _camera = cv2.VideoCapture(0)
-            if not _camera.isOpened():
-                _active_ips.discard(ip)
-                print(f"[CAMERA] ERROR: Webcam not available for IP {ip}")
-                raise HTTPException(status_code=503, detail="Registration camera (Webcam #1) not available.")
-            # Warm up
-            for _ in range(5):
-                _camera.read()
-            print(f"[CAMERA] Camera initialized for IP {ip}")
+        with _lock:
+            if _camera is None or not _camera.isOpened():
+                cap_target = stream_url if stream_url else 0
+                print(f"[CAMERA] Initializing camera for IP {ip} with source {cap_target}")
+                try:
+                    _camera = cv2.VideoCapture(cap_target)
+                    if not _camera.isOpened():
+                        _active_ips.discard(ip)
+                        _camera = None
+                        print(f"[CAMERA] ERROR: Camera source not available: {cap_target}")
+                        raise RuntimeError(f"Camera source not available: {cap_target}")
+                    _current_stream_source = stream_url
+                    # Warm up
+                    for _ in range(5):
+                        _camera.read()
+                    print(f"[CAMERA] Camera initialized for IP {ip} from source {cap_target}")
+                except RuntimeError:
+                    raise  # Re-raise our own error
+                except Exception as e:
+                    _active_ips.discard(ip)
+                    _camera = None
+                    print(f"[CAMERA] ERROR initializing camera: {e}")
+                    raise RuntimeError(f"Camera initialization failed: {e}")
         
         return True
 
@@ -113,13 +156,16 @@ def stop_camera_for_ip(ip: str) -> bool:
     """
     global _active_ips, _stopped_ips
     
+    # Safety: handle None/empty IP
+    if not ip:
+        ip = "unknown"
+    
     print(f"[CAMERA] stop_camera_for_ip({ip}) called")
     
     with _camera_lock:
         # Remove IP from active IPs
-        if ip in _active_ips:
-            _active_ips.discard(ip)
-            print(f"[CAMERA] IP {ip} removed from active_ips: {_active_ips}")
+        _active_ips.discard(ip)
+        print(f"[CAMERA] IP {ip} removed from active_ips: {_active_ips}")
         
         # Add IP to stopped IPs
         _stopped_ips.add(ip)
@@ -153,6 +199,12 @@ def get_stopped_ips() -> Set[str]:
     """Get the set of stopped IPs."""
     with _camera_lock:
         return _stopped_ips.copy()
+
+
+def get_current_stream_source() -> Optional[str]:
+    """Get the current camera stream source (None = local webcam)."""
+    with _camera_lock:
+        return _current_stream_source
 
 
 def clear_stopped_ip(ip: str):

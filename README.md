@@ -317,7 +317,7 @@ The system now supports IP-based camera access control with the following behavi
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/register/camera/start` | Start camera access for requesting IP |
+| POST | `/register/camera/start` | Start camera access for requesting IP (accepts optional `stream_url` for external RTSP/HTTP streams) |
 | POST | `/register/camera/stop` | Stop camera access for requesting IP |
 | GET | `/register/camera/status` | Check camera access status for requesting IP |
 | POST | `/register/camera/clear-stop` | Clear stopped status for requesting IP (allow reuse) |
@@ -326,8 +326,13 @@ The system now supports IP-based camera access control with the following behavi
 ### Usage Example
 
 ```javascript
-// IP 192.168.1.100 starts camera
+// IP 192.168.1.100 starts camera with default local webcam
 fetch('http://127.0.0.1:8001/register/camera/start', { method: 'POST' })
+  .then(r => r.json())
+  .then(data => console.log(data));
+
+// Start camera with an external RTSP/HTTP stream
+fetch('http://127.0.0.1:8001/register/camera/start?stream_url=http://192.168.1.50/video', { method: 'POST' })
   .then(r => r.json())
   .then(data => console.log(data));
 

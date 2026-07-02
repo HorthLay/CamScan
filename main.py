@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 import os
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
@@ -12,7 +12,8 @@ from services.capture_service import (
     get_camera, read_camera_frame, release_camera, 
     start_stream, stop_stream,
     start_camera_for_ip, stop_camera_for_ip,
-    is_ip_allowed, get_active_ips, get_stopped_ips, clear_stopped_ip
+    is_ip_allowed, get_active_ips, get_stopped_ips, clear_stopped_ip,
+    get_current_stream_source
 )
 from camera_websockets import websocket_camera_endpoint
 
@@ -65,6 +66,10 @@ def generate_frames():
     start_stream()
     try:
         while True:
+            # If all IPs have disconnected, break the stream loop to prevent camera reopen
+            if len(get_active_ips()) == 0:
+                break
+            
             try:
                 frame = read_camera_frame()
             except Exception:
@@ -86,14 +91,15 @@ def home():
     return {"status": "running", "message": "CamScan Face Recognition API"}
 
 
-from fastapi import Request
+
 
 @app.get("/video_feed")
-def video_feed(request: Request):
+def video_feed(request: Request, stream_url: str = Query(None, description="Optional RTSP/HTTP stream URL")):
     """
     Stream camera feed. Checks if requesting IP is allowed to use the camera.
+    Accepts an optional stream_url query param for CCTV stream connections.
     """
-    client_ip = request.client.host
+    client_ip = request.client.host if request.client else "unknown"
     
     # Check if IP is allowed to use camera
     if not is_ip_allowed(client_ip):
@@ -102,10 +108,27 @@ def video_feed(request: Request):
             detail=f"IP {client_ip} is not allowed to access camera (another IP is using it)"
         )
     
-    # Start camera for this IP if not already active
-    start_camera_for_ip(client_ip)
+    # Start camera for this IP (with optional stream URL)
+    try:
+        start_camera_for_ip(client_ip, stream_url=stream_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Camera error: {str(e)}")
     
     return StreamingResponse(
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+@app.get("/camera/source")
+def camera_source():
+    """Return the current camera stream source."""
+    source = get_current_stream_source()
+    return {
+        "stream_source": source,
+        "type": "rtsp/http" if source else "local_webcam",
+        "active_ips": list(get_active_ips()),
+        "stopped_ips": list(get_stopped_ips())
+    }

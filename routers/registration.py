@@ -495,7 +495,7 @@ async def sync_from_laravel(request: Request, db: Session = Depends(get_db)):
 # ── IP-based Camera Control Endpoints ────────────────────────────────────────
 
 @router.post("/camera/start", summary="Start camera for specific IP")
-async def start_camera_ip(
+def start_camera_ip(
     request: Request,
 ):
     """
@@ -526,7 +526,7 @@ async def start_camera_ip(
 
 
 @router.post("/camera/stop", summary="Stop camera for specific IP")
-async def stop_camera_ip(
+def stop_camera_ip(
     request: Request,
 ):
     """
