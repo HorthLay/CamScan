@@ -521,11 +521,15 @@
         <section class="card" id="cameraCard">
             <div class="section-title">
                 <span>Live Surveillance Terminal</span>
-                <span id="cameraLabel" style="font-size: 12px; color: var(--success);">ONLINE</span>
+                <span id="cameraLabel" style="font-size: 12px; color: var(--text-muted);">OFFLINE</span>
             </div>
             
-            <div class="camera-container">
-                <img class="camera-feed" src="http://127.0.0.1:8001/video_feed" alt="Live camera feed">
+            <div class="camera-container" style="display: flex; align-items: center; justify-content: center; position: relative;">
+                <img class="camera-feed" id="cameraFeed" src="" alt="Live camera feed" style="display: none;">
+                <div id="cameraPlaceholder" class="placeholder-text" style="color: var(--text-muted); font-size: 14px; font-weight: 500; text-align: center; line-height: 1.6;">
+                    Camera Offline<br>
+                    <span style="font-size: 12px; opacity: 0.7;">Click button below to search</span>
+                </div>
                 <div class="scanner-overlay" id="scannerOverlay">
                     <div class="scanner-line"></div>
                     <div class="scan-pulse"></div>
@@ -619,6 +623,9 @@
         const resultsCard = document.getElementById("resultsCard");
         const statusIndicatorDot = document.getElementById("statusIndicatorDot");
         const statusIndicatorText = document.getElementById("statusIndicatorText");
+        const cameraFeed = document.getElementById("cameraFeed");
+        const cameraPlaceholder = document.getElementById("cameraPlaceholder");
+        const cameraLabel = document.getElementById("cameraLabel");
         
         // Match Badge Elements
         const matchBadge = document.getElementById("matchBadge");
@@ -688,6 +695,13 @@
         }
 
         searchButton.addEventListener("click", async () => {
+            // Start the stream and update labels
+            cameraFeed.src = `${API_BASE}/video_feed?ts=${Date.now()}`;
+            cameraFeed.style.display = "block";
+            cameraPlaceholder.style.display = "none";
+            cameraLabel.textContent = "ONLINE";
+            cameraLabel.style.color = "var(--success)";
+
             // Disable search button and reset UI states
             searchButton.disabled = true;
             scannerOverlay.style.display = "block";
@@ -802,6 +816,13 @@
             } finally {
                 searchButton.disabled = false;
                 scannerOverlay.style.display = "none";
+                
+                // Stop the stream and restore placeholder
+                cameraFeed.src = "";
+                cameraFeed.style.display = "none";
+                cameraPlaceholder.style.display = "block";
+                cameraLabel.textContent = "OFFLINE";
+                cameraLabel.style.color = "var(--text-muted)";
             }
         });
     </script>
