@@ -12,8 +12,8 @@ Uses Mistral AI vision to analyze a face photo and auto-fill:
 import os
 import base64
 import json
-import asyncio
 from datetime import date
+from typing import Optional
 from fastapi import HTTPException
 from dotenv import load_dotenv
 
@@ -112,10 +112,11 @@ Do NOT include suggested_position. If the photo is unclear or no face is visible
     )
 
 
-async def analyze_face(image_bytes: bytes) -> dict:
+def analyze_face(image_bytes: bytes) -> dict:
     """
     Send face image to the configured Mistral agent.
     Returns dict: { age, gender, position, notes }
+    Callers run this in a worker thread (FastAPI sync endpoints) — it blocks.
     """
     if not MISTRAL_API_KEY:
         raise HTTPException(
@@ -124,7 +125,7 @@ async def analyze_face(image_bytes: bytes) -> dict:
         )
 
     try:
-        response = await asyncio.to_thread(_start_face_analysis_conversation, image_bytes)
+        response = _start_face_analysis_conversation(image_bytes)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -159,7 +160,6 @@ def generate_ai_notes_from_user(name: str, age: Optional[int] = None, date_of_bi
     This creates a simple note without using external AI.
     Note can be: walkout, work, resign
     """
-    from typing import Optional
     parts = []
     if name:
         parts.append(f"Name: {name}")

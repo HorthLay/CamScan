@@ -5,6 +5,7 @@ All database operations for users and embeddings.
 """
 
 import os
+import threading
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from models import User, FaceEmbedding
 from services.face_service import embedding_to_json
+from services.embedding_cache import invalidate_embeddings
 
 try:
     import requests
@@ -78,10 +80,11 @@ def create_user(
     db.add(emb_record)
     db.commit()
     db.refresh(user)
-    
-    # Sync to Laravel
+    invalidate_embeddings()
+
+    # Sync to Laravel (background, never blocks registration)
     sync_user_to_laravel(user)
-    
+
     return user
 
 
@@ -100,6 +103,7 @@ def delete_user(db: Session, user_id: int):
     user = get_user(db, user_id)
     db.delete(user)
     db.commit()
+    invalidate_embeddings()
 
 
 def add_embedding(db: Session, user_id: int, face_bytes: bytes, embedding) -> FaceEmbedding:
@@ -116,6 +120,7 @@ def add_embedding(db: Session, user_id: int, face_bytes: bytes, embedding) -> Fa
     )
     db.add(record)
     db.commit()
+    invalidate_embeddings()
     return record
 
 
@@ -145,14 +150,15 @@ def load_all_embeddings(db: Session) -> List[dict]:
 
 
 def sync_user_to_laravel(user: User):
-    """Sync user name, date_of_birth, age, and note to Laravel web app."""
+    """Sync user name, date_of_birth, age, and note to Laravel in the background."""
     if not requests:
         return
-    
+
     laravel_url = os.getenv("LARAVEL_URL", "http://localhost")
     if not laravel_url:
         return
-    
+
+    # Snapshot plain values now so we don't touch the ORM object from another thread.
     try:
         data = {
             "name": user.name,
@@ -160,12 +166,26 @@ def sync_user_to_laravel(user: User):
             "age": user.age,
             "note": user.note if user.note else None,
         }
+    except Exception as exc:
+        print(f"Warning: Could not read user for Laravel sync: {exc}")
+        return
+
+    threading.Thread(
+        target=_sync_user_worker,
+        args=(laravel_url, data),
+        daemon=True,
+        name="laravel-sync",
+    ).start()
+
+
+def _sync_user_worker(laravel_url: str, data: dict):
+    """POST to Laravel off the request thread. Failures never break the API."""
+    try:
         response = requests.post(
             f"{laravel_url}/api/users/sync-from-fastapi",
             data=data,
-            timeout=10
+            timeout=10,
         )
         response.raise_for_status()
     except Exception as e:
-        # Log error but don't fail the FastAPI operation
         print(f"Warning: Failed to sync user to Laravel: {e}")

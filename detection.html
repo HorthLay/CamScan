@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CamScan – Detection & CCTV Control Center</title>
+    <meta name="description" content="CamScan multi-camera CCTV detection dashboard with live face recognition, detection logs, and daily analytics.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        /* ── Design Tokens ── */
+        :root {
+            --bg-base: #06090f;
+            --bg-surface: rgba(13, 19, 32, 0.85);
+            --bg-surface-2: rgba(18, 26, 42, 0.9);
+            --bg-hover: rgba(30, 42, 66, 0.6);
+            --border: rgba(255, 255, 255, 0.06);
+            --border-focus: rgba(99, 102, 241, 0.5);
+            --primary: #6366f1;
+            --primary-light: #818cf8;
+            --primary-glow: rgba(99, 102, 241, 0.3);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.3);
+            --warning: #f59e0b;
+            --warning-glow: rgba(245, 158, 11, 0.3);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.3);
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.3);
+            --text: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-dim: #64748b;
+            --font: 'Inter', -apple-system, sans-serif;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg-base);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image:
+                radial-gradient(ellipse at 15% 10%, rgba(99, 102, 241, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 85% 90%, rgba(6, 182, 212, 0.04) 0%, transparent 50%);
+        }
+
+        /* ── Header ── */
+        .app-header {
+            position: sticky; top: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 32px;
+            background: rgba(6, 9, 15, 0.88);
+            backdrop-filter: blur(20px) saturate(1.5);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo { display: flex; align-items: center; gap: 12px; }
+
+        .logo-mark {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--cyan));
+            border-radius: 10px;
+            display: grid; place-items: center;
+            font-weight: 900; font-size: 14px; color: #fff;
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .logo-text {
+            font-size: 18px; font-weight: 800;
+            background: linear-gradient(135deg, #fff, var(--text-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+
+        .header-actions { display: flex; gap: 12px; align-items: center; }
+
+        .header-stat {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 14px; border-radius: 20px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            font-size: 12px; font-weight: 600; color: var(--text-secondary);
+        }
+
+        .header-stat .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            animation: pulse-glow 2s infinite;
+        }
+
+        .dot-green { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .dot-blue { background: var(--primary); box-shadow: 0 0 8px var(--primary); }
+
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.3); }
+        }
+
+        /* ── Layout ── */
+        .app-body {
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 0;
+            min-height: calc(100vh - 65px);
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            background: var(--bg-surface);
+            border-right: 1px solid var(--border);
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-title {
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1.5px;
+            color: var(--text-dim); margin-bottom: 14px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+
+        /* ── Add Camera Form ── */
+        .form-group { margin-bottom: 12px; }
+
+        .form-group label {
+            display: block; font-size: 12px; font-weight: 600;
+            color: var(--text-secondary); margin-bottom: 5px;
+        }
+
+        .form-input {
+            width: 100%; padding: 10px 14px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text); font-size: 13px; font-family: var(--font);
+            transition: border-color var(--transition);
+            outline: none;
+        }
+
+        .form-input:focus { border-color: var(--border-focus); }
+
+        .form-input::placeholder { color: var(--text-dim); }
+
+        .form-row { display: flex; gap: 8px; }
+
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 6px; padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 13px; font-weight: 700; font-family: var(--font);
+            cursor: pointer; border: none;
+            transition: all var(--transition);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), #4f46e5);
+            color: #fff; box-shadow: 0 2px 12px var(--primary-glow);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 18px var(--primary-glow); }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--success), #059669);
+            color: #fff; box-shadow: 0 2px 10px var(--success-glow);
+        }
+        .btn-success:hover { transform: translateY(-1px); }
+
+        .btn-danger {
+            background: linear-gradient(135deg, var(--danger), #dc2626);
+            color: #fff;
+        }
+        .btn-danger:hover { transform: translateY(-1px); }
+
+        .btn-ghost {
+            background: rgba(255,255,255,0.04);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+
+        .btn-sm { padding: 6px 12px; font-size: 11px; }
+        .btn-full { width: 100%; }
+
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+
+        /* ── Camera Cards ── */
+        .camera-list {
+            flex: 1; overflow-y: auto;
+            padding: 12px 20px; display: flex; flex-direction: column; gap: 8px;
+        }
+
+        .camera-card {
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px 14px;
+            cursor: pointer;
+            transition: all var(--transition);
+            position: relative;
+        }
+
+        .camera-card:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.1); }
+
+        .camera-card.active {
+            border-color: rgba(99, 102, 241, 0.4);
+            background: rgba(99, 102, 241, 0.06);
+        }
+
+        .camera-card.selected {
+            border-color: var(--cyan);
+            background: rgba(6, 182, 212, 0.06);
+            box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.2);
+        }
+
+        .camera-card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .camera-card-name {
+            font-size: 13px; font-weight: 700; color: var(--text);
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        .camera-card-status {
+            width: 8px; height: 8px; border-radius: 50%;
+        }
+
+        .camera-card-status.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .camera-card-status.offline { background: var(--text-dim); }
+        .camera-card-status.error { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+        .camera-card-meta {
+            font-size: 11px; color: var(--text-dim);
+            display: flex; gap: 10px; flex-wrap: wrap;
+        }
+
+        .camera-card-actions {
+            display: flex; gap: 4px; margin-top: 8px;
+        }
+
+        .camera-empty {
+            text-align: center; padding: 40px 20px;
+            color: var(--text-dim); font-size: 13px;
+        }
+
+        .camera-empty svg { width: 48px; height: 48px; opacity: 0.3; margin-bottom: 12px; display: block; margin-inline: auto; }
+
+        /* ── Main Content ── */
+        .main-content {
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ── Tab Bar ── */
+        .tab-bar {
+            display: flex; gap: 0; border-bottom: 1px solid var(--border);
+            background: var(--bg-surface);
+            padding: 0 24px;
+        }
+
+        .tab {
+            padding: 14px 20px;
+            font-size: 13px; font-weight: 600;
+            color: var(--text-dim);
+            cursor: pointer; border: none; background: none;
+            border-bottom: 2px solid transparent;
+            transition: all var(--transition);
+            font-family: var(--font);
+        }
+
+        .tab:hover { color: var(--text-secondary); }
+        .tab.active {
+            color: var(--primary-light);
+            border-bottom-color: var(--primary);
+        }
+
+        /* ── Tab Panels ── */
+        .tab-content { flex: 1; overflow: auto; }
+
+        .tab-panel { display: none; padding: 24px; height: 100%; }
+        .tab-panel.active { display: block; }
+
+        /* ── Live View Panel ── */
+        .live-grid {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 24px;
+            height: 100%;
+        }
+
+        .live-feed-container {
+            position: relative;
+            background: #000;
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            aspect-ratio: 16/10;
+        }
+
+        .live-feed-container img {
+            width: 100%; height: 100%; object-fit: contain;
+        }
+
+        .live-feed-overlay {
+            position: absolute; top: 12px; left: 12px; right: 12px;
+            display: flex; justify-content: space-between; align-items: flex-start;
+            pointer-events: none;
+        }
+
+        .live-feed-badge {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 12px; border-radius: 20px;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+            font-size: 11px; font-weight: 700; color: var(--text);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .live-feed-badge .rec-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--danger);
+            animation: pulse-glow 1s infinite;
+        }
+
+        .live-placeholder {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100%; color: var(--text-dim); gap: 16px;
+        }
+
+        .live-placeholder svg { width: 64px; height: 64px; opacity: 0.2; }
+
+        /* ── Detection Feed (sidebar in live view) ── */
+        .detection-sidebar {
+            display: flex; flex-direction: column; gap: 16px;
+        }
+
+        .detection-sidebar-title {
+            font-size: 14px; font-weight: 700; color: var(--text);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+
+        .detection-feed {
+            flex: 1; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 8px;
+            max-height: calc(100vh - 240px);
+        }
+
+        .detection-item {
+            display: flex; gap: 12px; align-items: center;
+            padding: 12px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            transition: all var(--transition);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .detection-item.matched { border-left: 3px solid var(--success); }
+        .detection-item.unknown { border-left: 3px solid var(--warning); }
+
+        .detection-avatar {
+            width: 40px; height: 40px; border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            display: grid; place-items: center;
+            font-size: 16px; font-weight: 800;
+            color: var(--text-dim); overflow: hidden; flex-shrink: 0;
+        }
+
+        .detection-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+        .detection-info { flex: 1; min-width: 0; }
+
+        .detection-name {
+            font-size: 13px; font-weight: 700; color: var(--text);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        .detection-meta {
+            font-size: 11px; color: var(--text-dim);
+            display: flex; gap: 8px; margin-top: 2px;
+        }
+
+        .detection-badge {
+            font-size: 10px; font-weight: 800; padding: 2px 8px;
+            border-radius: 10px; flex-shrink: 0;
+        }
+
+        .detection-badge.match { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .detection-badge.unknown-badge { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+
+        /* ── Stats Panel ── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            transition: all var(--transition);
+        }
+
+        .stat-card:hover { border-color: rgba(255,255,255,0.1); transform: translateY(-2px); }
+
+        .stat-card-label {
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px;
+            color: var(--text-dim); margin-bottom: 8px;
+        }
+
+        .stat-card-value {
+            font-size: 32px; font-weight: 900;
+            background: linear-gradient(135deg, var(--text), var(--text-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+
+        .stat-card-sub {
+            font-size: 12px; color: var(--text-dim); margin-top: 4px;
+        }
+
+        /* ── Detection Table ── */
+        .table-container {
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .table-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .table-header h3 {
+            font-size: 15px; font-weight: 700;
+        }
+
+        table {
+            width: 100%; border-collapse: collapse;
+        }
+
+        th {
+            text-align: left; padding: 12px 16px;
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px;
+            color: var(--text-dim);
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,0,0,0.15);
+        }
+
+        td {
+            padding: 12px 16px;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+            vertical-align: middle;
+        }
+
+        tr:hover td { background: rgba(255,255,255,0.02); }
+
+        .table-name {
+            display: flex; align-items: center; gap: 10px;
+        }
+
+        .table-avatar {
+            width: 32px; height: 32px; border-radius: 6px;
+            background: rgba(255,255,255,0.05);
+            display: grid; place-items: center; overflow: hidden;
+            font-size: 12px; font-weight: 700; color: var(--text-dim);
+        }
+
+        .table-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+        .confidence-pill {
+            display: inline-flex; padding: 3px 10px;
+            border-radius: 10px; font-size: 11px; font-weight: 700;
+        }
+
+        .confidence-pill.high { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .confidence-pill.medium { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+        .confidence-pill.low { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+
+        /* ── Webcam Test ── */
+        .webcam-test-section {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+        }
+
+        .webcam-preview {
+            background: #000;
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            aspect-ratio: 4/3;
+            position: relative;
+        }
+
+        .webcam-preview img, .webcam-preview video {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+
+        .webcam-result {
+            display: flex; flex-direction: column; gap: 16px;
+        }
+
+        .result-card {
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+        }
+
+        .result-card h3 {
+            font-size: 14px; font-weight: 700; margin-bottom: 16px;
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        .result-row {
+            display: flex; justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            font-size: 13px;
+        }
+
+        .result-row:last-child { border-bottom: none; }
+        .result-key { color: var(--text-dim); }
+        .result-val { font-weight: 600; color: var(--text); text-align: right; max-width: 60%; word-break: break-word; }
+
+        /* ── Toast ── */
+        .toast-container {
+            position: fixed; bottom: 24px; right: 24px; z-index: 999;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+
+        .toast {
+            padding: 12px 20px;
+            border-radius: var(--radius-sm);
+            font-size: 13px; font-weight: 600;
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.1);
+            animation: toastIn 0.3s ease, toastOut 0.3s ease 3.7s forwards;
+            max-width: 360px;
+        }
+
+        .toast.success { background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: rgba(16,185,129,0.3); }
+        .toast.error { background: rgba(239, 68, 68, 0.15); color: var(--danger); border-color: rgba(239,68,68,0.3); }
+        .toast.info { background: rgba(99, 102, 241, 0.15); color: var(--primary-light); border-color: rgba(99,102,241,0.3); }
+
+        @keyframes toastIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(10px); } }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+        /* ── Mobile ── */
+        @media (max-width: 1024px) {
+            .app-body { grid-template-columns: 1fr; }
+            .sidebar { display: none; }
+            .live-grid { grid-template-columns: 1fr; }
+            .webcam-test-section { grid-template-columns: 1fr; }
+            .app-header { padding: 12px 16px; }
+            .tab-panel { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="app-header">
+    <div class="logo">
+        <div class="logo-mark">CS</div>
+        <span class="logo-text">CamScan Detection Center</span>
+    </div>
+    <div class="header-actions">
+        <div class="header-stat">
+            <span class="dot dot-green" id="apiDot"></span>
+            <span id="apiStatus">API Connected</span>
+        </div>
+        <div class="header-stat">
+            <span class="dot dot-blue"></span>
+            <span id="cameraCount">0 Cameras</span>
+        </div>
+        <div class="header-stat" id="clockStat">
+            <span id="clock">00:00:00</span>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════ BODY ═══════════════ -->
+<div class="app-body">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar">
+        <!-- Add Camera Form -->
+        <div class="sidebar-section">
+            <div class="sidebar-title">
+                <span>Add Camera / CCTV</span>
+            </div>
+            <form id="addCameraForm">
+                <div class="form-group">
+                    <label>Camera Name</label>
+                    <input class="form-input" type="text" id="camName" placeholder="Front Door CCTV" required>
+                </div>
+                <div class="form-group">
+                    <label>Source (RTSP URL / Webcam Index)</label>
+                    <input class="form-input" type="text" id="camSource" placeholder="rtsp://192.168.1.100:554/stream or 0" required>
+                </div>
+                <div class="form-group">
+                    <label>Location</label>
+                    <input class="form-input" type="text" id="camLocation" placeholder="Building A, Floor 1">
+                </div>
+                <button class="btn btn-primary btn-full" type="submit" id="addCameraBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Add & Start Detection
+                </button>
+            </form>
+        </div>
+
+        <!-- Camera List -->
+        <div class="sidebar-title" style="padding: 14px 20px 0; margin-bottom: 0;">
+            <span>Cameras</span>
+            <span id="cameraListCount" style="font-size: 11px; color: var(--text-dim);">0</span>
+        </div>
+        <div class="camera-list" id="cameraList">
+            <div class="camera-empty" id="cameraEmpty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+                <div>No cameras added yet.<br>Add one above to begin detection.</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── MAIN ── -->
+    <main class="main-content">
+        <!-- Tab Bar -->
+        <div class="tab-bar">
+            <button class="tab active" data-tab="live" id="tabLive">
+                ◉ Live View
+            </button>
+            <button class="tab" data-tab="detections" id="tabDetections">
+                ⚡ Detection Log
+            </button>
+            <button class="tab" data-tab="stats" id="tabStats">
+                📊 Daily Stats
+            </button>
+            <button class="tab" data-tab="webcam" id="tabWebcam">
+                🎥 Webcam Test
+            </button>
+        </div>
+
+        <div class="tab-content">
+
+            <!-- ═══ LIVE VIEW ═══ -->
+            <div class="tab-panel active" id="panelLive">
+                <div class="live-grid">
+                    <div>
+                        <div class="live-feed-container" id="liveFeedContainer">
+                            <div class="live-placeholder" id="livePlaceholder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+                                </svg>
+                                <div style="text-align:center;">
+                                    <div style="font-weight:700; margin-bottom:4px;">No Camera Selected</div>
+                                    <div style="font-size:12px;">Select a camera from the sidebar to view live feed</div>
+                                </div>
+                            </div>
+                            <img id="liveFeedImg" style="display:none;" alt="Live CCTV Feed">
+                            <div class="live-feed-overlay">
+                                <div class="live-feed-badge" id="liveBadge" style="display:none;">
+                                    <span class="rec-dot"></span>
+                                    <span id="liveBadgeText">LIVE</span>
+                                </div>
+                                <div class="live-feed-badge" id="liveCamLabel" style="display:none;">
+                                    <span id="liveCamName">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detection-sidebar">
+                        <div class="detection-sidebar-title">
+                            <span>Recent Detections</span>
+                            <span style="font-size:11px; color: var(--text-dim);" id="detectionCount">0</span>
+                        </div>
+                        <div class="detection-feed" id="detectionFeed">
+                            <div class="camera-empty" style="padding: 30px;" id="detectionEmpty">
+                                <div>No detections yet.<br>Start a camera to begin.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ DETECTION LOG ═══ -->
+            <div class="tab-panel" id="panelDetections">
+                <div class="table-container">
+                    <div class="table-header">
+                        <h3>Detection History</h3>
+                        <button class="btn btn-ghost btn-sm" onclick="refreshDetections()">⟳ Refresh</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Person</th>
+                                <th>Camera</th>
+                                <th>Confidence</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detectionsTableBody">
+                            <tr><td colspan="5" style="text-align:center; color: var(--text-dim); padding: 40px;">No detections recorded yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ═══ STATS ═══ -->
+            <div class="tab-panel" id="panelStats">
+                <div class="stats-grid" id="statsGrid">
+                    <div class="stat-card">
+                        <div class="stat-card-label">Total Cameras</div>
+                        <div class="stat-card-value" id="statTotalCameras">0</div>
+                        <div class="stat-card-sub">Registered sources</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-label">Active Now</div>
+                        <div class="stat-card-value" id="statActiveCameras">0</div>
+                        <div class="stat-card-sub">Running detection</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-label">Detections Today</div>
+                        <div class="stat-card-value" id="statDetectionsToday">0</div>
+                        <div class="stat-card-sub" id="statDetectionsDate">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-label">Unique Persons</div>
+                        <div class="stat-card-value" id="statUniquePersons">0</div>
+                        <div class="stat-card-sub">Identified today</div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <div class="table-header">
+                        <h3>Per-Camera Daily Breakdown</h3>
+                        <button class="btn btn-ghost btn-sm" onclick="refreshStats()">⟳ Refresh</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Camera</th>
+                                <th>Location</th>
+                                <th>Detections</th>
+                                <th>Status</th>
+                                <th>Last Detection</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statsTableBody">
+                            <tr><td colspan="5" style="text-align:center; color: var(--text-dim); padding: 40px;">No stats available yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ═══ WEBCAM TEST ═══ -->
+            <div class="tab-panel" id="panelWebcam">
+                <div class="webcam-test-section">
+                    <div>
+                        <div class="webcam-preview" id="webcamPreviewBox">
+                            <img id="webcamFeed" src="" alt="Webcam Feed" style="display:none;">
+                            <div class="live-placeholder" id="webcamPlaceholder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+                                </svg>
+                                <div>Click "Start Webcam" to preview</div>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:12px;">
+                            <button class="btn btn-success" id="startWebcamBtn" onclick="startWebcam()">▶ Start Webcam Feed</button>
+                            <button class="btn btn-primary" id="testDetectBtn" onclick="testDetect()" disabled>🔍 Detect & Identify</button>
+                            <button class="btn btn-ghost" id="stopWebcamBtn" onclick="stopWebcam()" disabled>⏹ Stop</button>
+                        </div>
+                    </div>
+                    <div class="webcam-result">
+                        <div class="result-card">
+                            <h3>
+                                <span id="testResultIcon">⏳</span>
+                                Detection Result
+                            </h3>
+                            <div id="testResultBody">
+                                <div class="result-row"><span class="result-key">Status</span><span class="result-val" id="testStatus">Waiting...</span></div>
+                                <div class="result-row"><span class="result-key">Name</span><span class="result-val" id="testName">-</span></div>
+                                <div class="result-row"><span class="result-key">Age</span><span class="result-val" id="testAge">-</span></div>
+                                <div class="result-row"><span class="result-key">Gender</span><span class="result-val" id="testGender">-</span></div>
+                                <div class="result-row"><span class="result-key">Position</span><span class="result-val" id="testPosition">-</span></div>
+                                <div class="result-row"><span class="result-key">Confidence</span><span class="result-val" id="testConfidence">-</span></div>
+                                <div class="result-row"><span class="result-key">AI Notes</span><span class="result-val" id="testAiNotes">-</span></div>
+                                <div class="result-row"><span class="result-key">Note</span><span class="result-val" id="testNote">-</span></div>
+                            </div>
+                        </div>
+                        <div class="result-card" id="testMatchImageCard" style="display:none;">
+                            <h3>📸 Matched Face</h3>
+                            <img id="testMatchImage" style="width:100%; border-radius:8px;" alt="Matched face">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+const API = "http://127.0.0.1:8001";
+let selectedCameraId = null;
+let pollInterval = null;
+let detectionPollInterval = null;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════
+function toast(msg, type = "info") {
+    const el = document.createElement("div");
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    document.getElementById("toastContainer").appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+}
+
+function formatTime(iso) {
+    if (!iso) return "-";
+    const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatDateTime(iso) {
+    if (!iso) return "-";
+    const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));
+    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// Clock
+function updateClock() {
+    const now = new Date();
+    document.getElementById("clock").textContent = now.toLocaleTimeString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════════════════
+document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById("panel" + capitalize(tab.dataset.tab)).classList.add("active");
+
+        if (tab.dataset.tab === "detections") refreshDetections();
+        if (tab.dataset.tab === "stats") refreshStats();
+    });
+});
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HEALTH CHECK
+// ═══════════════════════════════════════════════════════════════════════════
+async function checkAPI() {
+    try {
+        const r = await fetch(`${API}/health`, { signal: AbortSignal.timeout(3000) });
+        const d = await r.json();
+        document.getElementById("apiDot").className = "dot dot-green";
+        document.getElementById("apiStatus").textContent = `API ${d.status === "ok" ? "Online" : "Degraded"}`;
+    } catch {
+        document.getElementById("apiDot").className = "dot";
+        document.getElementById("apiDot").style.background = "var(--danger)";
+        document.getElementById("apiStatus").textContent = "API Offline";
+    }
+}
+checkAPI();
+setInterval(checkAPI, 15000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CAMERA MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadCameras() {
+    try {
+        const r = await fetch(`${API}/cctv/cameras`);
+        const d = await r.json();
+        renderCameraList(d.cameras || []);
+        document.getElementById("cameraCount").textContent = `${(d.cameras || []).length} Cameras`;
+        document.getElementById("cameraListCount").textContent = (d.cameras || []).length;
+    } catch (e) {
+        console.error("Failed to load cameras:", e);
+    }
+}
+
+function renderCameraList(cameras) {
+    const list = document.getElementById("cameraList");
+    const empty = document.getElementById("cameraEmpty");
+
+    // Remove all camera cards but keep empty placeholder
+    list.querySelectorAll(".camera-card").forEach(c => c.remove());
+
+    if (cameras.length === 0) {
+        empty.style.display = "block";
+        return;
+    }
+    empty.style.display = "none";
+
+    cameras.forEach(cam => {
+        const card = document.createElement("div");
+        card.className = `camera-card ${cam.is_active ? "active" : ""} ${selectedCameraId === cam.camera_id ? "selected" : ""}`;
+        card.id = `cam-${cam.camera_id}`;
+
+        const statusClass = cam.error ? "error" : cam.is_active ? "online" : "offline";
+        const statusLabel = cam.error ? "Error" : cam.is_active ? "Active" : "Offline";
+
+        card.innerHTML = `
+            <div class="camera-card-header">
+                <div class="camera-card-name">
+                    <span class="camera-card-status ${statusClass}"></span>
+                    ${cam.name}
+                </div>
+            </div>
+            <div class="camera-card-meta">
+                <span>${cam.location || "No location"}</span>
+                <span>·</span>
+                <span>${statusLabel}</span>
+            </div>
+            <div class="camera-card-actions">
+                ${cam.is_active
+                    ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); stopCamera('${cam.camera_id}')">⏹ Stop</button>`
+                    : `<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); startCamera('${cam.camera_id}')">▶ Start</button>`
+                }
+                <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); selectCamera('${cam.camera_id}', '${cam.name}')">👁 View</button>
+                <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); removeCamera('${cam.camera_id}')" title="Remove">✕</button>
+            </div>
+        `;
+
+        card.addEventListener("click", () => selectCamera(cam.camera_id, cam.name));
+        list.appendChild(card);
+    });
+}
+
+// Add Camera
+document.getElementById("addCameraForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("camName").value.trim();
+    const source = document.getElementById("camSource").value.trim();
+    const location = document.getElementById("camLocation").value.trim();
+
+    if (!name || !source) return;
+
+    const btn = document.getElementById("addCameraBtn");
+    btn.disabled = true;
+
+    try {
+        const r = await fetch(`${API}/cctv/cameras`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, source, location, auto_start: true }),
+        });
+        const d = await r.json();
+        if (d.success) {
+            toast(`Camera "${name}" added and detection started!`, "success");
+            document.getElementById("camName").value = "";
+            document.getElementById("camSource").value = "";
+            document.getElementById("camLocation").value = "";
+            loadCameras();
+            // Auto-select the new camera
+            setTimeout(() => selectCamera(d.camera_id, name), 1000);
+        } else {
+            toast(d.detail || "Failed to add camera", "error");
+        }
+    } catch (e) {
+        toast("Error adding camera: " + e.message, "error");
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+async function startCamera(cameraId) {
+    try {
+        await fetch(`${API}/cctv/cameras/${cameraId}/start`, { method: "POST" });
+        toast("Detection started", "success");
+        loadCameras();
+    } catch (e) {
+        toast("Failed to start: " + e.message, "error");
+    }
+}
+
+async function stopCamera(cameraId) {
+    try {
+        await fetch(`${API}/cctv/cameras/${cameraId}/stop`, { method: "POST" });
+        toast("Detection stopped", "info");
+        loadCameras();
+    } catch (e) {
+        toast("Failed to stop: " + e.message, "error");
+    }
+}
+
+async function removeCamera(cameraId) {
+    if (!confirm("Remove this camera?")) return;
+    try {
+        await fetch(`${API}/cctv/cameras/${cameraId}`, { method: "DELETE" });
+        toast("Camera removed", "info");
+        if (selectedCameraId === cameraId) deselectCamera();
+        loadCameras();
+    } catch (e) {
+        toast("Error: " + e.message, "error");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE VIEW
+// ═══════════════════════════════════════════════════════════════════════════
+function selectCamera(cameraId, cameraName) {
+    selectedCameraId = cameraId;
+
+    // Update UI
+    document.querySelectorAll(".camera-card").forEach(c => c.classList.remove("selected"));
+    const card = document.getElementById(`cam-${cameraId}`);
+    if (card) card.classList.add("selected");
+
+    // Show live feed
+    const img = document.getElementById("liveFeedImg");
+    const placeholder = document.getElementById("livePlaceholder");
+    img.src = `${API}/cctv/cameras/${cameraId}/stream?ts=${Date.now()}`;
+    img.style.display = "block";
+    placeholder.style.display = "none";
+
+    document.getElementById("liveBadge").style.display = "flex";
+    document.getElementById("liveCamLabel").style.display = "flex";
+    document.getElementById("liveCamName").textContent = cameraName;
+}
+
+function deselectCamera() {
+    selectedCameraId = null;
+    document.getElementById("liveFeedImg").style.display = "none";
+    document.getElementById("livePlaceholder").style.display = "flex";
+    document.getElementById("liveBadge").style.display = "none";
+    document.getElementById("liveCamLabel").style.display = "none";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETECTION FEED (polling)
+// ═══════════════════════════════════════════════════════════════════════════
+async function pollDetections() {
+    try {
+        const url = selectedCameraId
+            ? `${API}/cctv/detections?camera_id=${selectedCameraId}&limit=20`
+            : `${API}/cctv/detections?limit=20`;
+        const r = await fetch(url);
+        const d = await r.json();
+        renderDetectionFeed(d.detections || []);
+    } catch { /* silent */ }
+}
+
+function renderDetectionFeed(detections) {
+    const feed = document.getElementById("detectionFeed");
+    const empty = document.getElementById("detectionEmpty");
+    document.getElementById("detectionCount").textContent = detections.length;
+
+    // Clear old items
+    feed.querySelectorAll(".detection-item").forEach(el => el.remove());
+
+    if (detections.length === 0) {
+        empty.style.display = "block";
+        return;
+    }
+    empty.style.display = "none";
+
+    detections.forEach(det => {
+        const el = document.createElement("div");
+        el.className = `detection-item ${det.matched ? "matched" : "unknown"}`;
+
+        const avatarContent = det.face_image
+            ? `<img src="${API}/${det.face_image}" alt="${det.name}">`
+            : (det.name ? det.name.charAt(0).toUpperCase() : "?");
+
+        el.innerHTML = `
+            <div class="detection-avatar">${avatarContent}</div>
+            <div class="detection-info">
+                <div class="detection-name">${det.name || "Unknown"}</div>
+                <div class="detection-meta">
+                    <span>${det.camera_name || "-"}</span>
+                    <span>${formatTime(det.detected_at)}</span>
+                    ${det.confidence ? `<span>${(det.confidence * 100).toFixed(0)}%</span>` : ""}
+                </div>
+            </div>
+            <span class="detection-badge ${det.matched ? "match" : "unknown-badge"}">${det.matched ? "MATCH" : "UNKNOWN"}</span>
+        `;
+        feed.appendChild(el);
+    });
+}
+
+// Start polling detections
+detectionPollInterval = setInterval(pollDetections, 3000);
+pollDetections();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETECTION LOG TABLE
+// ═══════════════════════════════════════════════════════════════════════════
+async function refreshDetections() {
+    try {
+        const r = await fetch(`${API}/cctv/detections?limit=100`);
+        const d = await r.json();
+        renderDetectionsTable(d.detections || []);
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function renderDetectionsTable(detections) {
+    const tbody = document.getElementById("detectionsTableBody");
+    if (detections.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-dim); padding: 40px;">No detections recorded yet.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = detections.map(det => {
+        const conf = det.confidence || 0;
+        const confClass = conf >= 0.8 ? "high" : conf >= 0.6 ? "medium" : "low";
+        const confPct = (conf * 100).toFixed(0) + "%";
+        const avatarContent = det.face_image
+            ? `<img src="${API}/${det.face_image}" alt="">`
+            : (det.name ? det.name.charAt(0) : "?");
+
+        return `<tr>
+            <td>
+                <div class="table-name">
+                    <div class="table-avatar">${avatarContent}</div>
+                    <div>
+                        <div style="font-weight:600;">${det.name || "Unknown"}</div>
+                        ${det.age ? `<div style="font-size:11px; color: var(--text-dim);">Age: ${det.age}</div>` : ""}
+                    </div>
+                </div>
+            </td>
+            <td style="color: var(--text-secondary);">${det.camera_name || "-"}</td>
+            <td><span class="confidence-pill ${confClass}">${confPct}</span></td>
+            <td style="color: var(--text-dim); font-size:12px;">${formatDateTime(det.detected_at)}</td>
+            <td><span class="detection-badge ${det.matched ? "match" : "unknown-badge"}">${det.matched ? "MATCHED" : "UNKNOWN"}</span></td>
+        </tr>`;
+    }).join("");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════════════════════════════════════
+async function refreshStats() {
+    try {
+        // Get cameras
+        const cr = await fetch(`${API}/cctv/cameras`);
+        const cd = await cr.json();
+        const cameras = cd.cameras || [];
+
+        document.getElementById("statTotalCameras").textContent = cameras.length;
+        document.getElementById("statActiveCameras").textContent = cameras.filter(c => c.is_active).length;
+
+        // Get detections for today
+        const dr = await fetch(`${API}/cctv/detections?limit=500`);
+        const dd = await dr.json();
+        const today = new Date().toISOString().slice(0, 10);
+        const todayDetections = (dd.detections || []).filter(d => d.detected_at && d.detected_at.startsWith(today));
+
+        document.getElementById("statDetectionsToday").textContent = todayDetections.length;
+        document.getElementById("statDetectionsDate").textContent = today;
+
+        // Unique persons today
+        const uniqueIds = new Set(todayDetections.filter(d => d.user_id).map(d => d.user_id));
+        document.getElementById("statUniquePersons").textContent = uniqueIds.size;
+
+        // Per-camera breakdown table
+        const tbody = document.getElementById("statsTableBody");
+        if (cameras.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-dim); padding: 40px;">No cameras configured.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = cameras.map(cam => {
+            const camDetections = todayDetections.filter(d => d.camera_id === cam.camera_id);
+            const statusClass = cam.is_active ? "online" : "offline";
+            return `<tr>
+                <td><div class="table-name"><span class="camera-card-status ${statusClass}" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;"></span><strong>${cam.name}</strong></div></td>
+                <td style="color: var(--text-dim);">${cam.location || "-"}</td>
+                <td><strong>${camDetections.length}</strong></td>
+                <td><span class="detection-badge ${cam.is_active ? "match" : "unknown-badge"}">${cam.is_active ? "ACTIVE" : "OFFLINE"}</span></td>
+                <td style="color: var(--text-dim); font-size:12px;">${cam.last_detection_at ? formatDateTime(cam.last_detection_at) : "Never"}</td>
+            </tr>`;
+        }).join("");
+    } catch (e) {
+        console.error("Stats error:", e);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WEBCAM TEST
+// ═══════════════════════════════════════════════════════════════════════════
+let webcamActive = false;
+
+function startWebcam() {
+    const feed = document.getElementById("webcamFeed");
+    const placeholder = document.getElementById("webcamPlaceholder");
+
+    feed.src = `${API}/video_feed?ts=${Date.now()}`;
+    feed.style.display = "block";
+    placeholder.style.display = "none";
+    webcamActive = true;
+
+    document.getElementById("startWebcamBtn").disabled = true;
+    document.getElementById("testDetectBtn").disabled = false;
+    document.getElementById("stopWebcamBtn").disabled = false;
+
+    toast("Webcam feed started", "success");
+}
+
+function stopWebcam() {
+    const feed = document.getElementById("webcamFeed");
+    const placeholder = document.getElementById("webcamPlaceholder");
+
+    feed.src = "";
+    feed.style.display = "none";
+    placeholder.style.display = "flex";
+    webcamActive = false;
+
+    document.getElementById("startWebcamBtn").disabled = false;
+    document.getElementById("testDetectBtn").disabled = true;
+    document.getElementById("stopWebcamBtn").disabled = true;
+}
+
+async function testDetect() {
+    const btn = document.getElementById("testDetectBtn");
+    btn.disabled = true;
+    document.getElementById("testResultIcon").textContent = "⏳";
+    document.getElementById("testStatus").textContent = "Scanning...";
+
+    try {
+        const r = await fetch(`${API}/register/search?server_countdown=false`, { method: "POST" });
+        const d = await r.json();
+
+        if (d.matched && d.user) {
+            document.getElementById("testResultIcon").textContent = "✅";
+            document.getElementById("testStatus").textContent = "Match Found!";
+            document.getElementById("testStatus").style.color = "var(--success)";
+            document.getElementById("testName").textContent = d.user.name || "-";
+            document.getElementById("testAge").textContent = d.user.age || "-";
+            document.getElementById("testGender").textContent = d.user.gender || "-";
+            document.getElementById("testPosition").textContent = d.user.position || "-";
+            document.getElementById("testConfidence").textContent = d.user.confidence ? `${(d.user.confidence * 100).toFixed(1)}%` : "-";
+            document.getElementById("testAiNotes").textContent = d.user.ai_notes || "-";
+            document.getElementById("testNote").textContent = d.user.note || "-";
+
+            if (d.user.face_image) {
+                document.getElementById("testMatchImage").src = `${API}/${d.user.face_image}?ts=${Date.now()}`;
+                document.getElementById("testMatchImageCard").style.display = "block";
+            }
+
+            toast(`Matched: ${d.user.name}`, "success");
+        } else {
+            document.getElementById("testResultIcon").textContent = "❌";
+            document.getElementById("testStatus").textContent = "No Match";
+            document.getElementById("testStatus").style.color = "var(--danger)";
+            document.getElementById("testName").textContent = "Unknown Person";
+            document.getElementById("testAge").textContent = "-";
+            document.getElementById("testGender").textContent = "-";
+            document.getElementById("testPosition").textContent = "-";
+            document.getElementById("testConfidence").textContent = "-";
+            document.getElementById("testAiNotes").textContent = "-";
+            document.getElementById("testNote").textContent = "-";
+            document.getElementById("testMatchImageCard").style.display = "none";
+
+            toast("No matching user found", "info");
+        }
+    } catch (e) {
+        document.getElementById("testResultIcon").textContent = "⚠️";
+        document.getElementById("testStatus").textContent = "Error: " + e.message;
+        document.getElementById("testStatus").style.color = "var(--danger)";
+        toast("Detection error: " + e.message, "error");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+loadCameras();
+setInterval(loadCameras, 10000);
+</script>
+</body>
+</html>

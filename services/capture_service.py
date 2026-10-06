@@ -8,8 +8,8 @@ Manages Webcam #1 (registration camera) with:
 """
 
 import io
-import math
-import struct
+import logging
+import platform
 import threading
 import time
 import wave
@@ -18,21 +18,41 @@ import numpy as np
 from typing import Optional
 from fastapi import HTTPException
 
+logger = logging.getLogger("camscan.capture")
+
+# ── Platform-aware camera backend ────────────────────────────────────────────
+# Windows MSMF (default) frequently hangs on VideoCapture(0). DirectShow is
+# reliable and fast. On Linux/macOS the default (V4L2/AVFoundation) is fine.
+
+_IS_WINDOWS = platform.system() == "Windows"
+_CAMERA_BACKEND = cv2.CAP_DSHOW if _IS_WINDOWS else cv2.CAP_ANY
+
 # ── Camera singleton (Webcam #1) ─────────────────────────────────────────────
 
 _camera: Optional[cv2.VideoCapture] = None
 _lock = threading.Lock()
 
+CAMERA_WIDTH  = 1280
+CAMERA_HEIGHT = 720
+CAMERA_FPS    = 30
+
 
 def get_camera() -> cv2.VideoCapture:
     global _camera
     if _camera is None or not _camera.isOpened():
-        _camera = cv2.VideoCapture(0)   # Webcam #1 — index 0
+        logger.info("Opening webcam 0 with backend %s ...",
+                     "DSHOW" if _IS_WINDOWS else "ANY")
+        _camera = cv2.VideoCapture(0, _CAMERA_BACKEND)
         if not _camera.isOpened():
+            logger.error("Failed to open registration camera (Webcam #1).")
             raise HTTPException(status_code=503, detail="Registration camera (Webcam #1) not available.")
+        _camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+        _camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+        _camera.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
         # Warm up — discard first few frames
-        for _ in range(5):
+        for _ in range(3):
             _camera.read()
+        logger.info("Webcam 0 ready (%dx%d).", CAMERA_WIDTH, CAMERA_HEIGHT)
     return _camera
 
 
@@ -43,18 +63,35 @@ def release_camera():
         _camera = None
 
 
+def camera_available() -> bool:
+    """Cheap check: has the shared camera been opened and is it still alive?"""
+    return _camera is not None and _camera.isOpened()
+
+
 # ── TTS voice countdown ───────────────────────────────────────────────────────
+
+_tts_engine = None
+_tts_lock = threading.Lock()
+
+
+def _get_tts_engine():
+    """Create the pyttsx3 engine once and reuse it (engine init is expensive)."""
+    global _tts_engine
+    if _tts_engine is None:
+        import pyttsx3
+        _tts_engine = pyttsx3.init()
+        _tts_engine.setProperty("rate", 160)
+        _tts_engine.setProperty("volume", 1.0)
+    return _tts_engine
+
 
 def _speak(text: str):
     """Speak text using pyttsx3 (runs offline, no API needed)."""
     try:
-        import pyttsx3
-        engine = pyttsx3.init()
-        engine.setProperty("rate", 160)
-        engine.setProperty("volume", 1.0)
-        engine.say(text)
-        engine.runAndWait()
-        engine.stop()
+        with _tts_lock:
+            engine = _get_tts_engine()
+            engine.say(text)
+            engine.runAndWait()
     except Exception as e:
         print(f"[TTS] Warning: {e}")   # non-fatal — continue without voice
 
@@ -66,6 +103,7 @@ def _read_fresh_frame(camera: cv2.VideoCapture) -> np.ndarray:
 
     ok, frame = camera.read()
     if not ok or frame is None:
+        release_camera()
         raise HTTPException(status_code=503, detail="Failed to capture frame from camera.")
 
     return frame
@@ -140,20 +178,24 @@ def build_countdown_audio() -> bytes:
         (880, 0.45), (0, 0.15),
     ]
 
-    pcm = bytearray()
+    t = np.arange(int(sample_rate * sum(seconds for _, seconds in parts))) / sample_rate
+    signal = np.zeros_like(t)
+    cursor = 0
     for frequency, seconds in parts:
-        samples = int(sample_rate * seconds)
-        for i in range(samples):
-            if frequency:
-                value = int(amplitude * math.sin(2 * math.pi * frequency * i / sample_rate))
-            else:
-                value = 0
-            pcm.extend(struct.pack("<h", value))
+        start = cursor
+        end = cursor + int(sample_rate * seconds)
+        if frequency:
+            signal[start:end] = amplitude * np.sin(
+                2 * np.pi * frequency * np.arange(start, end) / sample_rate
+            )
+        cursor = end
+
+    pcm = signal.astype(np.int16).tobytes()
 
     output = io.BytesIO()
     with wave.open(output, "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(sample_rate)
-        wav.writeframes(bytes(pcm))
+        wav.writeframes(pcm)
     return output.getvalue()

@@ -5,6 +5,7 @@ numpy
 pillow
 insightface
 onnxruntime
+uniface[cpu]
 sqlalchemy
 pymysql
 python-multipart
@@ -16,3 +17,5 @@ pydantic
 httpx
 mistralai
 pyttsx3
+supabase
+psycopg2-binary

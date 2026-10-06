@@ -9,10 +9,10 @@ A FastAPI-based face recognition system with AI-powered registration, live detec
 | Layer | Technology |
 |---|---|
 | API | FastAPI + Uvicorn |
-| Face Recognition | InsightFace (buffalo_l model) |
+| Face Recognition | UniFace (SCRFD detection + ArcFace embeddings, ONNX) — InsightFace fallback |
 | AI Analysis | Mistral Pixtral vision |
 | Voice Countdown | pyttsx3 (offline TTS) |
-| Database | MySQL via XAMPP |
+| Database | MySQL via XAMPP (falls back to Supabase / SQLite) |
 | ORM | SQLAlchemy |
 | Dashboard | Laravel (separate) |
 
@@ -33,7 +33,10 @@ CamScan/
 │   └── registration.py            # Registration endpoints
 │
 ├── services/
-│   ├── face_service.py            # InsightFace model, embeddings, matching
+│   ├── face_service.py            # Engine facade: UniFace (default) / InsightFace
+│   ├── uniface_service.py         # UniFace: SCRFD detection, ArcFace embeddings, liveness
+│   ├── embedding_cache.py         # In-memory cache for the search-time embedding list
+│   ├── supabase_service.py        # Optional Supabase REST/storage client
 │   ├── user_service.py            # User CRUD, file saving
 │   ├── detection_service.py       # Detection logs, snapshots
 │   ├── video_service.py           # MP4 recording, video DB logs
@@ -104,10 +107,37 @@ Copy `.env.example` to `.env` and fill in:
 DATABASE_URL=mysql+pymysql://root:@localhost:3306/camscan
 
 # Mistral AI — get free key at https://console.mistral.ai
+```
 MISTRAL_API_KEY=your_mistral_api_key_here
 MISTRAL_AGENT_ID=ag_019f12454e1c719eaeb6258b095471d1
 MISTRAL_AGENT_VERSION=0
+
+# Face engine — uniface (SCRFD + ArcFace, ONNX) | insightface (legacy)
+# IMPORTANT: embeddings differ per engine; use the same engine you registered users with.
+FACE_BACKEND=uniface
+FACE_DETECTOR=scrfd_500m        # scrfd_500m (fast) | scrfd_10g (accurate) | retinaface
+MIN_FACE_CONF=0.5
+
+# Camera security — anti-spoofing on /register/search (blocks photo/screen/mask)
+LIVENESS_CHECK=true
+LIVENESS_THRESHOLD=0.6
+
+# Supabase fallback (optional) — used automatically when DATABASE_URL is unreachable
+# From Supabase Dashboard -> Project Settings -> API / Database
+SUPABASE_URL=https://<ref>.supabase.co
+SUPABASE_KEY=your_anon_or_service_role_key
+SUPABASE_DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
 ```
+
+### Automatic database fallback
+
+At startup the app picks the first database that responds:
+
+1. `DATABASE_URL` (primary, e.g. MySQL)
+2. `SUPABASE_DATABASE_URL` (alternate/temp)
+3. Local SQLite file (`camscan_fallback.db`) — last resort so the app never crashes
+
+Only the MySQL primary runs the column-migration SQL; Postgres/SQLite schemas are created fresh from the models. Get the Supabase connection string from *Project Settings → Database → Connection string* (use the **Session pooler** on port `6543`).
 
 ---
 
@@ -254,22 +284,29 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 
 | Service | File | Responsibility |
 |---|---|---|
-| Face | `face_service.py` | Load InsightFace, generate embeddings, cosine similarity matching |
+| Face | `face_service.py` | Engine facade — picks UniFace or InsightFace, embeddings, vectorized matching |
+| UniFace | `uniface_service.py` | SCRFD/RetinaFace detection, ArcFace 512-d embeddings, MiniFASNet liveness |
+| Embedding cache | `embedding_cache.py` | Caches the search-time embedding list; auto-invalidated on user changes |
 | User | `user_service.py` | User CRUD, save uploaded images to disk |
 | Detection | `detection_service.py` | Log detections, save snapshots, query history |
 | Video | `video_service.py` | Start/stop MP4 recording per camera, log to DB |
 | Capture | `capture_service.py` | Control Webcam #1, speak 3-2-1 countdown via pyttsx3 |
 | Mistral | `mistral_service.py` | Call Mistral Pixtral API, parse age/gender/position from photo |
+| Supabase | `supabase_service.py` | Optional Supabase client (REST / storage / auth) |
 
 ---
 
 ## Face Matching Logic
 
-- Model: `buffalo_l` (InsightFace) — 512-dimensional embeddings
-- Similarity: cosine similarity
-- Match threshold: `0.5` (adjustable in `face_service.py`)
+- **Default engine:** UniFace — SCRFD detection + ArcFace mobile embedding (`512-d`, ONNX), ~faster on CPU
+- **Fallback engine:** InsightFace `buffalo_l` (legacy) — used when `FACE_BACKEND=insightface` or UniFace fails to load
+- Similarity: cosine similarity (vectorized numpy matrix multiply)
+- Match threshold: `0.55` (adjustable in `routers/registration.py`)
 - Multiple embeddings per user supported (different angles/lighting)
 - Largest face chosen when multiple faces appear in frame
+- **Liveness / anti-spoofing:** when `LIVENESS_CHECK=true`, `/register/search` runs MiniFASNet on the captured face and rejects photos, screens, and masks before matching
+
+> ⚠️ **Embedding compatibility:** ArcFace (UniFace) and buffalo_l (InsightFace) embeddings live in different feature spaces. If you already registered users under InsightFace, keep `FACE_BACKEND=insightface` (or re-register) — switching engines will break old matches.
 
 ---
 
@@ -280,6 +317,7 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 | `ImportError: cannot import name 'Base' from 'models'` | Python cache conflict | Run `find . -name __pycache__ -exec rm -rf {} +` then retry |
 | `Access denied for user 'root'` | Wrong DB password in `.env` | XAMPP default has no password — use `root:@localhost` |
 | `No face detected` | Blurry or dark photo | Better lighting, move closer to camera |
+| `UniFace model download on first start` | SCRFD / ArcFace / MiniFASNet weights fetched on first use | Needs internet once; then cached locally |
 | `MISTRAL_API_KEY not set` | Missing `.env` value | Add key from console.mistral.ai to `.env` |
 | `Cannot open webcam` | Camera index wrong or in use | Try `cv2.VideoCapture(1)` in `capture_service.py` |
 | `pyttsx3` no sound | Audio driver issue on Mac | Run `pip install pyttsx3` and check system audio output |
@@ -298,5 +336,5 @@ Open `http://localhost:8001/docs` — Swagger UI shows all endpoints.
 - `face_embeding` column name has one `d` — intentional, matches existing DB schema
 - Embeddings are stored as JSON arrays in `LONGTEXT` columns — readable from Laravel without extra libraries
 - `pyttsx3` works fully offline — no internet required for voice countdown
-- InsightFace downloads the `buffalo_l` model (~300 MB) on first run automatically
+- UniFace downloads its SCRFD / ArcFace / MiniFASNet ONNX weights on first use (insightface's `buffalo_l` only if the fallback engine is used)
 - All uploaded files stay local — nothing is sent to external servers except the Mistral API call
